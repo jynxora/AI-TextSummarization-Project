@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Distill — Text Summarisation</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,600&family=Outfit:wght@300;400;500&display=swap" rel="stylesheet"/>
+<style>
+/* ── TOKENS ──────────────────────────────────────────────────────── */
+:root {
+  --paper:       #F4F1EC;
+  --surface:     #FDFCFA;
+  --ink:         #1E1B18;
+  --ink-mid:     #6A6560;
+  --ink-faint:   #B5B0A8;
+  --border:      #E0DCD5;
+  --clay:        #B85C3A;
+  --clay-wash:   #F5EDE8;
+  --sage:        #5C7A65;
+  --sage-wash:   #EBF1EC;
+  --r:           6px;
+}
+
+/* ── RESET ───────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'Outfit', sans-serif;
+  font-weight: 400;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── LAYOUT SHELL ────────────────────────────────────────────────── */
+.shell {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 32px;
+}
+@media (max-width: 640px) { .shell { padding: 0 20px; } }
+
+/* ── HEADER ──────────────────────────────────────────────────────── */
+header {
+  padding: 36px 0 28px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+.wordmark {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 1.75rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  line-height: 1;
+}
+.wordmark em {
+  font-style: italic;
+  color: var(--clay);
+}
+.tagline {
+  font-size: 0.8rem;
+  font-weight: 300;
+  color: var(--ink-faint);
+  letter-spacing: 0.03em;
+}
+.server-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: middle;
+  transition: background 0.4s;
+}
+.server-dot.online { background: var(--sage); }
+.server-dot.error  { background: var(--clay); }
+
+/* ── SESSION STRIP ───────────────────────────────────────────────── */
+.session-strip {
+  display: flex;
+  gap: 28px;
+  padding: 20px 0 0;
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+  font-weight: 300;
+}
+.session-strip strong { color: var(--ink-mid); font-weight: 500; }
+
+/* ── WORKSPACE ───────────────────────────────────────────────────── */
+.workspace {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  padding: 32px 0 0;
+}
+@media (max-width: 800px) {
+  .workspace { grid-template-columns: 1fr; }
+}
+
+/* ── PANE ────────────────────────────────────────────────────────── */
+.pane {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pane-head {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.pane-label {
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.pane-body { padding: 18px; flex: 1; display: flex; flex-direction: column; gap: 18px; }
+
+/* ── TEXTAREA ────────────────────────────────────────────────────── */
+textarea {
+  width: 100%;
+  min-height: 200px;
+  flex: 1;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.9rem;
+  font-weight: 400;
+  line-height: 1.8;
+  padding: 14px 16px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+textarea:focus { border-color: var(--clay); }
+textarea::placeholder { color: var(--ink-faint); font-weight: 300; font-style: italic; }
+
+/* ── FINE PRINT ──────────────────────────────────────────────────── */
+.fine {
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  font-weight: 300;
+  letter-spacing: 0.01em;
+}
+
+/* ── CONTROLS ────────────────────────────────────────────────────── */
+.ctrl-label {
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-mid);
+  margin-bottom: 10px;
+  display: block;
+}
+
+/* TONE PILLS */
+.tone-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tone-pill {
+  padding: 5px 13px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-mid);
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.78rem;
+  font-weight: 400;
+  cursor: pointer;
+  transition: all 0.16s;
+  line-height: 1;
+}
+.tone-pill:hover { border-color: var(--clay); color: var(--clay); }
+.tone-pill.active {
+  background: var(--clay);
+  border-color: var(--clay);
+  color: #fff;
+}
+
+/* LENGTH SLIDER */
+.length-row { display: flex; flex-direction: column; gap: 8px; }
+.length-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  color: var(--ink-faint);
+  font-weight: 300;
+}
+input[type="range"] {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 3px;
+  background: var(--border);
+  border-radius: 99px;
+  outline: none;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  background: var(--clay);
+  border: 2px solid var(--surface);
+  box-shadow: 0 0 0 1px var(--clay);
+  cursor: pointer;
+  transition: transform 0.12s;
+}
+input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.25); }
+.length-val {
+  font-size: 0.78rem;
+  color: var(--clay);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+/* ── BUTTONS ─────────────────────────────────────────────────────── */
+.btn-row { display: flex; gap: 8px; }
+
+.btn-go {
+  flex: 1;
+  padding: 11px 20px;
+  background: var(--ink);
+  color: var(--surface);
+  border: none;
+  border-radius: var(--r);
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: background 0.18s, transform 0.12s;
+}
+.btn-go:hover { background: var(--clay); }
+.btn-go:active { transform: scale(0.98); }
+.btn-go:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+.btn-ghost {
+  padding: 11px 14px;
+  background: transparent;
+  color: var(--ink-mid);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 400;
+  cursor: pointer;
+  transition: border-color 0.16s, color 0.16s;
+  white-space: nowrap;
+}
+.btn-ghost:hover { border-color: var(--ink-mid); color: var(--ink); }
+
+/* ── OUTPUT PANE ─────────────────────────────────────────────────── */
+.output-area {
+  flex: 1;
+  min-height: 200px;
+  position: relative;
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  background: var(--paper);
+  padding: 16px;
+  overflow: auto;
+}
+.output-empty {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none;
+}
+.output-empty p {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 1rem;
+  color: var(--ink-faint);
+  text-align: center;
+  max-width: 200px;
+  line-height: 1.7;
+}
+.output-text {
+  font-size: 0.92rem;
+  line-height: 1.85;
+  color: var(--ink);
+  font-weight: 400;
+}
+
+/* LOADING STATE */
+.output-loading {
+  position: absolute; inset: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: var(--paper);
+  border-radius: var(--r);
+}
+.output-loading.active { display: flex; }
+.loader-bar {
+  width: 80px;
+  height: 2px;
+  background: var(--border);
+  border-radius: 99px;
+  overflow: hidden;
+  position: relative;
+}
+.loader-bar::after {
+  content: '';
+  position: absolute;
+  left: -40%;
+  width: 40%;
+  height: 100%;
+  background: var(--clay);
+  border-radius: 99px;
+  animation: slide 1.2s ease-in-out infinite;
+}
+@keyframes slide {
+  0%   { left: -40%; }
+  100% { left: 100%; }
+}
+.loader-note {
+  font-size: 0.72rem;
+  color: var(--ink-faint);
+  font-weight: 300;
+  letter-spacing: 0.06em;
+  animation: fadepulse 1.4s ease-in-out infinite;
+}
+@keyframes fadepulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+/* TAGS */
+.out-meta {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.tag {
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  font-weight: 400;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--ink-mid);
+  background: var(--surface);
+}
+.tag.clay {
+  color: var(--clay);
+  border-color: rgba(184,92,58,0.25);
+  background: var(--clay-wash);
+}
+.tag.sage {
+  color: var(--sage);
+  border-color: rgba(92,122,101,0.25);
+  background: var(--sage-wash);
+}
+
+/* ── KEY POINTS ──────────────────────────────────────────────────── */
+#keyPoints { display: none; margin-top: 12px; }
+.kp-heading {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-style: italic;
+  color: var(--ink-mid);
+  margin-bottom: 10px;
+  letter-spacing: 0.01em;
+}
+.kp-item {
+  display: flex;
+  gap: 10px;
+  padding: 9px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  font-size: 0.82rem;
+  line-height: 1.6;
+  color: var(--ink-mid);
+  margin-bottom: 6px;
+}
+.kp-marker {
+  color: var(--clay);
+  flex-shrink: 0;
+  margin-top: 1px;
+  font-size: 0.7rem;
+}
+
+/* ── ERROR ───────────────────────────────────────────────────────── */
+.error-band {
+  display: none;
+  padding: 10px 14px;
+  background: var(--clay-wash);
+  border: 1px solid rgba(184,92,58,0.2);
+  border-radius: var(--r);
+  font-size: 0.78rem;
+  color: var(--clay);
+  font-weight: 400;
+  line-height: 1.55;
+}
+.error-band.show { display: block; }
+
+/* ── SERVER STATUS BAR ───────────────────────────────────────────── */
+.server-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  gap: 12px;
+}
+.server-label { font-size: 0.72rem; color: var(--ink-faint); font-weight: 300; }
+.server-url-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.75rem;
+  color: var(--ink-mid);
+  outline: none;
+  font-weight: 400;
+}
+.btn-ping {
+  font-size: 0.7rem;
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--ink-mid);
+  cursor: pointer;
+  font-family: 'Outfit', sans-serif;
+  transition: all 0.14s;
+}
+.btn-ping:hover { border-color: var(--ink-mid); color: var(--ink); }
+
+/* ── HISTORY ─────────────────────────────────────────────────────── */
+.history-section {
+  padding: 40px 0 60px;
+}
+.section-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 1.1rem;
+  font-weight: 600;
+  font-style: italic;
+  color: var(--ink-mid);
+  margin-bottom: 18px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.history-list { display: flex; flex-direction: column; gap: 1px; }
+.history-entry {
+  display: grid;
+  grid-template-columns: 80px 1fr auto;
+  align-items: start;
+  gap: 20px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.history-entry:hover { background: var(--surface); }
+.he-time { font-size: 0.7rem; color: var(--ink-faint); padding-top: 2px; font-weight: 300; }
+.he-snippet {
+  font-size: 0.83rem;
+  line-height: 1.6;
+  color: var(--ink-mid);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.he-meta { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+
+.history-empty {
+  padding: 28px 0;
+  font-size: 0.82rem;
+  color: var(--ink-faint);
+  font-style: italic;
+  font-family: 'Cormorant Garamond', serif;
+}
+
+/* ── TOAST ───────────────────────────────────────────────────────── */
+#toast {
+  position: fixed;
+  bottom: 24px; left: 50%;
+  transform: translateX(-50%) translateY(60px);
+  background: var(--ink);
+  color: var(--surface);
+  font-size: 0.75rem;
+  font-weight: 400;
+  padding: 9px 20px;
+  border-radius: 999px;
+  transition: transform 0.28s cubic-bezier(0.34,1.56,0.64,1);
+  z-index: 999;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+#toast.show { transform: translateX(-50%) translateY(0); }
+
+/* ── SETUP NOTICE ────────────────────────────────────────────────── */
+.setup-notice {
+  padding: 16px 20px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--clay);
+  border-radius: var(--r);
+  font-size: 0.8rem;
+  line-height: 1.7;
+  color: var(--ink-mid);
+}
+.setup-notice code {
+  font-size: 0.75rem;
+  background: var(--paper);
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  color: var(--ink);
+  font-family: 'Courier New', monospace;
+}
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ── HEADER ── -->
+  <header>
+    <div class="wordmark">Distill<em>.</em></div>
+    <div class="tagline">
+      <span class="server-dot" id="serverDot"></span>
+      <span id="serverStatus">checking server…</span>
+    </div>
+  </header>
+
+  <!-- ── SESSION STRIP ── -->
+  <div class="session-strip">
+    <span>Summaries this session: <strong id="s-count">0</strong></span>
+    <span>Words processed: <strong id="s-words">0</strong></span>
+    <span>Avg. compression: <strong id="s-comp">—</strong></span>
+  </div>
+
+  <!-- ── WORKSPACE ── -->
+  <div class="workspace">
+
+    <!-- INPUT PANE -->
+    <div class="pane">
+      <div class="pane-head">
+        <span class="pane-label">Input</span>
+        <span class="fine" id="wordCounter">0 words</span>
+      </div>
+      <div class="pane-body">
+        <textarea id="inputText"
+          placeholder="Paste an article, report, paper, or any body of text you want condensed…"
+        ></textarea>
+
+        <div>
+          <span class="ctrl-label">Tone</span>
+          <div class="tone-row" id="toneRow">
+            <button class="tone-pill active" data-tone="Formal">Formal</button>
+            <button class="tone-pill" data-tone="Casual">Casual</button>
+            <button class="tone-pill" data-tone="Humanised">Humanised</button>
+            <button class="tone-pill" data-tone="Academic">Academic</button>
+            <button class="tone-pill" data-tone="Professional">Professional</button>
+            <button class="tone-pill" data-tone="Simplified">Simplified</button>
+          </div>
+        </div>
+
+        <div>
+          <span class="ctrl-label">Length</span>
+          <div class="length-row">
+            <div class="length-ends">
+              <span>One sentence</span>
+              <span>Comprehensive</span>
+            </div>
+            <input type="range" id="lengthSlider" min="1" max="5" step="1" value="3"/>
+            <div class="length-val" id="lengthVal">Medium</div>
+          </div>
+        </div>
+
+        <div class="error-band" id="errorBand"></div>
+
+        <div class="btn-row">
+          <button class="btn-go" id="goBtn" onclick="runSummarise()">Summarise</button>
+          <button class="btn-ghost" onclick="pasteText()">Paste</button>
+          <button class="btn-ghost" onclick="clearAll()">Clear</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- OUTPUT PANE -->
+    <div class="pane">
+      <div class="pane-head">
+        <span class="pane-label">Output</span>
+        <div style="display:flex;gap:6px">
+          <button class="btn-ghost" style="padding:5px 10px;font-size:0.72rem" onclick="copySummary()">Copy</button>
+          <button class="btn-ghost" style="padding:5px 10px;font-size:0.72rem" onclick="downloadSummary()">Save</button>
+        </div>
+      </div>
+      <div class="pane-body">
+        <div class="output-area" id="outputArea">
+          <div class="output-loading" id="outputLoading">
+            <div class="loader-bar"></div>
+            <div class="loader-note" id="loaderNote">Processing…</div>
+          </div>
+          <div class="output-empty" id="outputEmpty">
+            <p>Your summary will appear here</p>
+          </div>
+          <div class="output-text" id="outputText"></div>
+        </div>
+
+        <div class="out-meta" id="outMeta" style="display:none">
+          <span class="tag clay" id="tagTone">—</span>
+          <span class="tag" id="tagLength">—</span>
+          <span class="tag sage" id="tagCompression" style="display:none">—</span>
+          <span class="tag sage" id="tagConf" style="display:none">—</span>
+          <span class="tag" id="tagWords" style="margin-left:auto">—</span>
+          <span class="tag" id="tagTime" style="display:none">—</span>
+        </div>
+
+        <div id="keyPoints"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── SERVER CONFIG ── -->
+  <div style="padding: 20px 0 0; display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start">
+    <div class="server-bar" style="flex:1;min-width:280px">
+      <span class="server-label">ML Server</span>
+      <input class="server-url-input" id="serverUrl" value="http://localhost:5000" placeholder="http://localhost:5000"/>
+      <button class="btn-ping" onclick="pingServer()">Ping</button>
+    </div>
+    <div class="setup-notice" style="flex:2;min-width:260px">
+      Start the engine: <code>cd ml_engine</code> → <code>pip install -r requirements.txt</code> → <code>python app.py</code>
+      — models download automatically on first run (~1.9 GB total).
+    </div>
+  </div>
+
+  <!-- ── HISTORY ── -->
+  <div class="history-section">
+    <div class="section-title">
+      <span>Session history</span>
+      <button class="btn-ghost" style="font-size:0.7rem;padding:4px 10px" onclick="clearHistory()">Clear</button>
+    </div>
+    <div class="history-list" id="historyList">
+      <div class="history-empty">No summaries yet.</div>
+    </div>
+  </div>
+
+</div><!-- /shell -->
+
+<div id="toast"></div>
+
+<script>
+// ─── STATE ────────────────────────────────────────────────────────────────────
+let selectedTone   = 'Formal';
+let selectedLength = 3;
+let history        = [];
+let sessionData    = { count: 0, words: 0, compressions: [] };
+
+const LENGTH_LABELS = { 1:'One sentence', 2:'Short', 3:'Medium', 4:'Detailed', 5:'Comprehensive' };
+const LOADING_STEPS = [
+  'Tokenising text…',
+  'Running BART summarisation…',
+  'Applying tone model…',
+  'Extracting key points…',
+  'Finishing up…',
+];
+
+// ─── SERVER PING ──────────────────────────────────────────────────────────────
+function getServer() {
+  return (document.getElementById('serverUrl').value || 'http://localhost:5000').replace(/\/$/, '');
+}
+
+async function pingServer() {
+  const dot = document.getElementById('serverDot');
+  const lbl = document.getElementById('serverStatus');
+  dot.className = 'server-dot';
+  lbl.textContent = 'checking…';
+  try {
+    const r = await fetch(getServer() + '/health', { method: 'GET' });
+    if (r.ok) {
+      dot.className = 'server-dot online';
+      lbl.textContent = 'engine online';
+    } else { throw new Error(); }
+  } catch {
+    dot.className = 'server-dot error';
+    lbl.textContent = 'engine offline';
+  }
+}
+
+// Ping on load
+pingServer();
+
+// ─── TONE PILLS ───────────────────────────────────────────────────────────────
+document.querySelectorAll('.tone-pill').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tone-pill').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedTone = btn.dataset.tone;
+  });
+});
+
+// ─── SLIDER ───────────────────────────────────────────────────────────────────
+document.getElementById('lengthSlider').addEventListener('input', function() {
+  selectedLength = +this.value;
+  document.getElementById('lengthVal').textContent = LENGTH_LABELS[selectedLength];
+});
+
+// ─── WORD COUNT ───────────────────────────────────────────────────────────────
+document.getElementById('inputText').addEventListener('input', () => {
+  const w = wordCount(document.getElementById('inputText').value);
+  document.getElementById('wordCounter').textContent = w ? `${w.toLocaleString()} words` : '0 words';
+});
+
+function wordCount(t) {
+  return (t.trim() ? t.trim().split(/\s+/) : []).length;
+}
+
+// ─── MAIN CALL ────────────────────────────────────────────────────────────────
+async function runSummarise() {
+  const text = document.getElementById('inputText').value.trim();
+  if (!text)                    { showError('Please add some text first.'); return; }
+  if (wordCount(text) < 20)    { showError('Need at least 20 words to summarise.'); return; }
+  clearError();
+  setLoading(true);
+
+  try {
+    const res = await fetch(getServer() + '/summarize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, tone: selectedTone, length: selectedLength }),
+    });
+
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+
+    renderOutput(data);
+    addHistory(data);
+    updateSession(data);
+    await pingServer();
+
+  } catch (err) {
+    showError(err.message.includes('fetch') || err.message.includes('network')
+      ? 'Cannot reach the ML engine. Is it running? Check the server URL below.'
+      : err.message);
+  } finally {
+    setLoading(false);
+  }
+}
+
+// ─── RENDER OUTPUT ────────────────────────────────────────────────────────────
+function renderOutput(data) {
+  document.getElementById('outputEmpty').style.display  = 'none';
+  const textEl = document.getElementById('outputText');
+  textEl.textContent = '';
+  typewrite(data.summary, textEl);
+
+  // Tags
+  const metaEl = document.getElementById('outMeta');
+  metaEl.style.display = 'flex';
+  document.getElementById('tagTone').textContent = data.tone;
+  document.getElementById('tagLength').textContent = LENGTH_LABELS[data.length_level];
+  document.getElementById('tagWords').textContent = `${data.output_words} words out`;
+  const comp = document.getElementById('tagCompression');
+  if (data.compression_pct > 0) {
+    comp.textContent = `${data.compression_pct}% shorter`;
+    comp.style.display = '';
+  }
+  // Tone confidence from Naive Bayes classifier
+  const confEl = document.getElementById('tagConf');
+  if (data.tone_confidence !== undefined) {
+    confEl.textContent = `tone confidence ${Math.round(data.tone_confidence * 100)}%`;
+    confEl.style.display = '';
+  }
+  // Processing time
+  const timeEl = document.getElementById('tagTime');
+  if (data.processing_ms !== undefined) {
+    timeEl.textContent = `${data.processing_ms}ms`;
+    timeEl.style.display = '';
+  }
+
+  // Key points
+  const kpEl = document.getElementById('keyPoints');
+  if (data.key_points && data.key_points.length) {
+    kpEl.style.display = 'block';
+    kpEl.innerHTML = `<div class="kp-heading">Key points</div>` +
+      data.key_points.map(p =>
+        `<div class="kp-item"><span class="kp-marker">—</span><span>${p}</span></div>`
+      ).join('');
+  } else {
+    kpEl.style.display = 'none';
+  }
+}
+
+// ─── TYPEWRITER ───────────────────────────────────────────────────────────────
+function typewrite(text, el) {
+  let i = 0;
+  function tick() {
+    if (i < text.length) {
+      el.textContent += text[i++];
+      setTimeout(tick, Math.random() * 10 + 6);
+    }
+  }
+  tick();
+}
+
+// ─── HISTORY ─────────────────────────────────────────────────────────────────
+function addHistory(data) {
+  history.unshift({ ...data, time: new Date().toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) });
+  renderHistory();
+}
+
+function renderHistory() {
+  const el = document.getElementById('historyList');
+  if (!history.length) {
+    el.innerHTML = '<div class="history-empty">No summaries yet.</div>';
+    return;
+  }
+  el.innerHTML = history.map((e,i) => `
+    <div class="history-entry" onclick="recallHistory(${i})">
+      <span class="he-time">${e.time}</span>
+      <span class="he-snippet">${e.summary}</span>
+      <div class="he-meta">
+        <span class="tag clay" style="font-size:0.62rem">${e.tone}</span>
+        <span class="tag" style="font-size:0.62rem">${e.output_words}w</span>
+      </div>
+    </div>`).join('');
+}
+
+function recallHistory(i) {
+  const e = history[i];
+  renderOutput(e);
+}
+
+function clearHistory() {
+  history = [];
+  renderHistory();
+}
+
+// ─── SESSION METRICS ──────────────────────────────────────────────────────────
+function updateSession(data) {
+  sessionData.count++;
+  sessionData.words += data.input_words;
+  sessionData.compressions.push(data.compression_pct);
+  document.getElementById('s-count').textContent = sessionData.count;
+  document.getElementById('s-words').textContent = sessionData.words.toLocaleString();
+  const avg = Math.round(sessionData.compressions.reduce((a,b)=>a+b,0) / sessionData.compressions.length);
+  document.getElementById('s-comp').textContent = `${avg}%`;
+}
+
+// ─── LOADING ──────────────────────────────────────────────────────────────────
+let loaderInterval;
+function setLoading(on) {
+  document.getElementById('outputLoading').classList.toggle('active', on);
+  document.getElementById('goBtn').disabled = on;
+  if (on) {
+    let i = 0;
+    const note = document.getElementById('loaderNote');
+    note.textContent = LOADING_STEPS[0];
+    loaderInterval = setInterval(() => {
+      i = (i+1) % LOADING_STEPS.length;
+      note.textContent = LOADING_STEPS[i];
+    }, 1400);
+  } else {
+    clearInterval(loaderInterval);
+  }
+}
+
+// ─── UTILITIES ────────────────────────────────────────────────────────────────
+function showError(msg) {
+  const el = document.getElementById('errorBand');
+  el.textContent = msg;
+  el.classList.add('show');
+}
+function clearError() {
+  document.getElementById('errorBand').classList.remove('show');
+}
+
+async function pasteText() {
+  try {
+    const t = await navigator.clipboard.readText();
+    document.getElementById('inputText').value = t;
+    document.getElementById('inputText').dispatchEvent(new Event('input'));
+    toast('Pasted');
+  } catch { showError('Clipboard access denied — paste manually (Ctrl+V).'); }
+}
+
+function clearAll() {
+  document.getElementById('inputText').value = '';
+  document.getElementById('wordCounter').textContent = '0 words';
+  document.getElementById('outputText').textContent = '';
+  document.getElementById('outputEmpty').style.display = 'flex';
+  document.getElementById('outMeta').style.display = 'none';
+  document.getElementById('keyPoints').style.display = 'none';
+  document.getElementById('keyPoints').innerHTML = '';
+  clearError();
+}
+
+async function copySummary() {
+  const t = document.getElementById('outputText').textContent;
+  if (!t) return;
+  await navigator.clipboard.writeText(t);
+  toast('Copied to clipboard');
+}
+
+function downloadSummary() {
+  const t = document.getElementById('outputText').textContent;
+  if (!t) return;
+  const a = document.createElement('a');
+  a.href = 'data:text/plain;charset=utf-8,' + encodeURIComponent(t);
+  a.download = `distill-${selectedTone.toLowerCase()}-${Date.now()}.txt`;
+  a.click();
+  toast('Saved');
+}
+
+let toastT;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.classList.remove('show'), 2000);
+}
+
+// Keyboard shortcut
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') runSummarise();
+});
+</script>
+</body>
+</html>
